@@ -191,6 +191,23 @@ public final class DiamondLedger implements AutoCloseable {
      */
     public synchronized boolean settle(String gameId, List<Transfer> transfers,
                                        byte[] finalAttachment) throws IOException {
+        return settle(gameId, transfers, finalAttachment, false);
+    }
+
+    /**
+     * Pays from each seat's escrow first, then its available wallet, atomically.
+     * Incoming payments cannot fund outgoing liabilities in the same settlement;
+     * pending withdrawals are already excluded from available wallet balances.
+     * Returns residual escrow and incoming payments to wallets. Replay and
+     * finalAttachment semantics are the same as settle().
+     */
+    public synchronized boolean settleWithWallet(String gameId, List<Transfer> transfers,
+                                                 byte[] finalAttachment) throws IOException {
+        return settle(gameId, transfers, finalAttachment, true);
+    }
+
+    private boolean settle(String gameId, List<Transfer> transfers, byte[] finalAttachment,
+                           boolean useWallet) throws IOException {
         checkOpen(); validId(gameId);
         Game game = requireGame(gameId);
         List<Transfer> normalized = normalize(transfers);
@@ -211,8 +228,14 @@ public final class DiamondLedger implements AutoCloseable {
         for (UUID player : game.players) {
             long original = game.escrow.get(player);
             long paid = outgoing.getOrDefault(player, 0L);
-            if (paid > original) throw new IllegalStateException("Payout exceeds reserved diamonds");
-            long refund = Math.addExact(original - paid, incoming.getOrDefault(player, 0L));
+            long remainingEscrow = original - paid;
+            if (remainingEscrow < 0) {
+                if (!useWallet) throw new IllegalStateException("Payout exceeds reserved diamonds");
+                // Check the shortfall before crediting this settlement's incoming payments.
+                changeWallet(next, player, remainingEscrow);
+                remainingEscrow = 0;
+            }
+            long refund = Math.addExact(remainingEscrow, incoming.getOrDefault(player, 0L));
             changeWallet(next, player, refund);
         }
         byte[] bytes = finalAttachment == null ? game.attachment : attachmentCopy(finalAttachment);

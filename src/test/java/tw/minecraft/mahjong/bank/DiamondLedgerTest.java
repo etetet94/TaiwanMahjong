@@ -25,6 +25,11 @@ public final class DiamondLedgerTest {
         }
         Path directory = Files.createTempDirectory(args.length > 0 ? Path.of(args[0]) : Path.of("."), "bank-tests-");
         walletAndEscrow(directory.resolve("normal.bin"));
+        walletSettlement(directory.resolve("wallet-settlement.bin"));
+        exactWalletSettlement(directory.resolve("exact-wallet-settlement.bin"));
+        insufficientWalletSettlement(directory.resolve("insufficient-wallet-settlement.bin"));
+        pendingWithdrawalSettlement(directory.resolve("pending-withdrawal-settlement.bin"));
+        walletSettlementWriteFailure(directory.resolve("wallet-settlement-write-failure.bin"));
         physical(directory.resolve("physical.bin"));
         rollback(directory.resolve("rollback.bin"));
         overflow(directory.resolve("overflow.bin"));
@@ -80,6 +85,122 @@ public final class DiamondLedgerTest {
             check(ledger.cancel("refund") && !ledger.cancel("refund"), "Cancel exactly once");
             check(ledger.balance(B) == 533 && ledger.totalHeld() == 1600, "Cancel conserves funds");
             check(ledger.closedGames().get("refund").status() == GameStatus.CANCELLED, "Closed history includes cancellation");
+        }
+    }
+
+    private static void walletSettlement(Path file) throws Exception {
+        List<Transfer> payments = List.of(new Transfer(A, B, 180), new Transfer(A, C, 70),
+                new Transfer(B, A, 50), new Transfer(C, A, 40));
+        List<Transfer> equivalent = List.of(new Transfer(C, A, 40), new Transfer(A, B, 80),
+                new Transfer(B, A, 50), new Transfer(A, C, 70), new Transfer(A, B, 100));
+        try (DiamondLedger ledger = new DiamondLedger(file)) {
+            ledger.credit(A, 500, "seed-a");
+            ledger.credit(B, 400, "seed-b");
+            ledger.credit(C, 300, "seed-c");
+            ledger.credit(D, 200, "seed-d");
+            ledger.reserve("wallet-game", PLAYERS, 100, new byte[]{1});
+            byte[] finalAttachment = new byte[]{9, 8};
+            check(ledger.settleWithWallet("wallet-game", payments, finalAttachment), "Wallet covers escrow shortfall");
+            finalAttachment[0] = 0;
+            check(ledger.balance(A) == 340 && ledger.balance(B) == 530 && ledger.balance(C) == 330
+                    && ledger.balance(D) == 200, "Settlement debits shortfall and refunds unused escrow plus incoming");
+            check(ledger.totalHeld() == 1400, "Wallet settlement conserves all diamonds");
+            check(ledger.game("wallet-game").orElseThrow().escrow().isEmpty()
+                    && ledger.openGames().isEmpty(), "Wallet settlement closes and clears escrow");
+            check(Arrays.equals(ledger.attachment("wallet-game"), new byte[]{9, 8}), "Final checkpoint copied atomically");
+            check(!ledger.settleWithWallet("wallet-game", equivalent, new byte[]{7}), "Normalized wallet settlement retry is no-op");
+            expect(IllegalStateException.class, () -> ledger.settleWithWallet("wallet-game", List.of(new Transfer(A, B, 179)), null));
+            check(ledger.balance(A) == 340 && ledger.totalHeld() == 1400
+                    && Arrays.equals(ledger.attachment("wallet-game"), new byte[]{9, 8}), "Retries preserve balances and final checkpoint");
+        }
+        try (DiamondLedger ledger = new DiamondLedger(file)) {
+            check(!ledger.settleWithWallet("wallet-game", equivalent, null), "Normalized wallet settlement replay survives reopening");
+            check(ledger.balance(A) == 340 && ledger.balance(B) == 530 && ledger.balance(C) == 330
+                    && ledger.balance(D) == 200 && ledger.totalHeld() == 1400, "Reopened wallet settlement remains exact");
+            check(ledger.closedGames().get("wallet-game").status() == GameStatus.SETTLED
+                    && Arrays.equals(ledger.attachment("wallet-game"), new byte[]{9, 8}), "Reopened wallet settlement retains final checkpoint");
+        }
+    }
+
+    private static void exactWalletSettlement(Path file) throws Exception {
+        try (DiamondLedger ledger = new DiamondLedger(file)) {
+            ledger.credit(A, 175, "seed-a");
+            ledger.credit(B, 125, "seed-b");
+            ledger.reserve("exact-game", List.of(A, B), 100, new byte[]{3});
+            List<Transfer> payments = List.of(new Transfer(A, B, 175));
+            check(ledger.settleWithWallet("exact-game", payments, null), "Exact escrow plus wallet balance is sufficient");
+            check(ledger.balance(A) == 0 && ledger.balance(B) == 300 && ledger.totalHeld() == 300,
+                    "Exact wallet settlement leaves zero and conserves diamonds");
+            check(Arrays.equals(ledger.attachment("exact-game"), new byte[]{3}), "Null final checkpoint retains prior checkpoint");
+            check(!ledger.settleWithWallet("exact-game", payments, null), "Settlement replay needs no remaining balance");
+        }
+    }
+
+    private static void insufficientWalletSettlement(Path file) throws Exception {
+        try (DiamondLedger ledger = new DiamondLedger(file)) {
+            ledger.credit(A, 500, "seed-a");
+            ledger.credit(B, 120, "seed-b");
+            ledger.credit(C, 100, "seed-c");
+            ledger.credit(D, 100, "seed-d");
+            ledger.reserve("insufficient-game", PLAYERS, 100, new byte[]{4});
+            byte[] originalFile = Files.readAllBytes(file);
+            List<Transfer> payments = List.of(new Transfer(A, C, 130), new Transfer(B, D, 121));
+            expect(IllegalStateException.class, () -> ledger.settleWithWallet("insufficient-game", payments, new byte[]{5}));
+            List<Transfer> withIncoming = List.of(new Transfer(A, C, 130), new Transfer(B, D, 121), new Transfer(D, B, 20));
+            expect(IllegalStateException.class, () -> ledger.settleWithWallet("insufficient-game", withIncoming, new byte[]{5}));
+            check(ledger.balance(A) == 400 && ledger.balance(B) == 20 && ledger.balance(C) == 0
+                    && ledger.balance(D) == 0 && ledger.totalHeld() == 820, "Insufficient wallet rolls back every seat, even with incoming payments");
+            GameView game = ledger.game("insufficient-game").orElseThrow();
+            check(game.status() == GameStatus.OPEN && game.escrow().equals(Map.of(A, 100L, B, 100L, C, 100L, D, 100L))
+                    && Arrays.equals(game.attachment(), new byte[]{4}), "Rejected wallet settlement retains escrow and checkpoint");
+            check(Arrays.equals(Files.readAllBytes(file), originalFile), "Rejected wallet settlement leaves durable snapshot unchanged");
+        }
+        try (DiamondLedger ledger = new DiamondLedger(file)) {
+            check(ledger.balance(A) == 400 && ledger.balance(B) == 20 && ledger.totalHeld() == 820
+                    && ledger.game("insufficient-game").orElseThrow().status() == GameStatus.OPEN,
+                    "Rejected wallet settlement remains unchanged after reopening");
+        }
+    }
+
+    private static void pendingWithdrawalSettlement(Path file) throws Exception {
+        try (DiamondLedger ledger = new DiamondLedger(file)) {
+            ledger.credit(A, 200, "seed-a");
+            ledger.credit(B, 100, "seed-b");
+            ledger.reserve("pending-game", List.of(A, B), 100);
+            ledger.stage("pending-out", A, 70, Direction.WITHDRAWAL);
+            ledger.stage("pending-in", A, 1000, Direction.DEPOSIT);
+            expect(IllegalStateException.class, () -> ledger.settleWithWallet("pending-game", List.of(new Transfer(A, B, 131)), null));
+            check(ledger.balance(A) == 30 && ledger.balance(B) == 0 && ledger.totalHeld() == 300,
+                    "Pending withdrawal and deposit cannot cover wallet settlement shortfall");
+            check(ledger.settleWithWallet("pending-game", List.of(new Transfer(A, B, 130)), null), "Only available wallet can be spent");
+            check(ledger.balance(A) == 0 && ledger.balance(B) == 230 && ledger.totalHeld() == 300,
+                    "Wallet settlement conserves pending withdrawal reservation");
+            check(ledger.pendingTransfers().size() == 2
+                    && ledger.physical("pending-out").orElseThrow().status() == PhysicalStatus.PENDING
+                    && ledger.physical("pending-in").orElseThrow().status() == PhysicalStatus.PENDING,
+                    "Wallet settlement leaves physical transfers untouched");
+        }
+    }
+
+    private static void walletSettlementWriteFailure(Path file) throws Exception {
+        try (DiamondLedger ledger = new DiamondLedger(file)) {
+            ledger.credit(A, 101, "seed-a");
+            ledger.credit(B, 101, "seed-b");
+            ledger.reserve("write-failure-game", List.of(A, B), 100, new byte[]{6});
+            byte[] originalFile = Files.readAllBytes(file);
+            List<Transfer> payments = List.of(new Transfer(A, B, 101));
+            Path temporary = file.resolveSibling(file.getFileName() + ".tmp");
+            Files.createDirectory(temporary);
+            try { expect(IOException.class, () -> ledger.settleWithWallet("write-failure-game", payments, new byte[]{7})); }
+            finally { Files.delete(temporary); }
+            check(ledger.balance(A) == 1 && ledger.balance(B) == 1 && ledger.totalHeld() == 202,
+                    "Wallet settlement write failure does not mutate balances");
+            check(ledger.game("write-failure-game").orElseThrow().status() == GameStatus.OPEN
+                    && Arrays.equals(ledger.attachment("write-failure-game"), new byte[]{6})
+                    && Arrays.equals(Files.readAllBytes(file), originalFile), "Wallet settlement write failure retains game and durable snapshot");
+            check(ledger.settleWithWallet("write-failure-game", payments, new byte[]{7}), "Failed wallet settlement can retry");
+            check(ledger.balance(A) == 0 && ledger.balance(B) == 202 && ledger.totalHeld() == 202,
+                    "Wallet settlement retry pays exactly once");
         }
     }
 

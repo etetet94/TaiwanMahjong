@@ -253,7 +253,7 @@ public final class TaiwanMahjongPlugin extends JavaPlugin implements Listener, C
         if(index<0){for(int i=0;i<4;i++)if(t.seats[i]==null){index=i;break;}}
         if(index<0||index>3||t.seats[index]!=null)throw new IllegalArgumentException("這個座位已有人。");
         t.seats[index]=p.getUniqueId();t.names[index]=p.getName();Arrays.fill(t.ready,false);t.revision++;render(t);show(p,t);
-        tell(p,"已入座。/mj bots 補電腦免費玩。四位真人都準備才開鑽石局，最多扣 "+required(t)+" 顆押金；超額欠債須挑戰 10 隻伏守者，勝利清債＋64鑽石、死亡清債且保留物品。");
+        tell(p,"已入座。/mj bots 補電腦免費玩。四位真人都準備才開鑽石局，每人押金 "+required(t)+" 顆；結算先扣押金、不足再扣麻將帳戶，仍付不起才記欠債並挑戰 10 隻伏守者，勝利清債＋64鑽石、死亡清債且保留物品。");
     }
     private long required(Table t){
         Object configured=getConfig().get("escrow-diamonds-per-player",5);
@@ -282,7 +282,7 @@ public final class TaiwanMahjongPlugin extends JavaPlugin implements Listener, C
         if(t.faulted || tables.get(t.id)!=t)throw new IllegalArgumentException("這張牌桌目前無法開局。");
         ensureNear(p,t);int seat=seat(t,p);if(t.session!=null)throw new IllegalArgumentException("這局已開始。");
         if(arena!=null && arena.hasDebt(p.getUniqueId()))throw new IllegalArgumentException("請先完成欠債競技場挑戰，再開新的鑽石牌局。/mj arena status 查看狀態。");
-        long required=required(t);if(ledger.balance(p.getUniqueId())<required)throw new IllegalArgumentException("帳戶需先存入 "+required+" 顆鑽石作為本局押金，本局最多輸這些；未輸掉的全退回。人數不足四人也能補電腦免費玩。");
+        long required=required(t);if(ledger.balance(p.getUniqueId())<required)throw new IllegalArgumentException("帳戶需先存入 "+required+" 顆鑽石作為本局押金；結算不足會再扣麻將帳戶餘額，兩者仍不足才算欠債。未用押金全退回。人數不足四人也能補電腦免費玩。");
         t.ready[seat]=!t.ready[seat];t.revision++;
         boolean all=true;for(int i=0;i<4;i++)if(t.seats[i]==null||!t.ready[i])all=false;
         if(all)start(t,false);else{render(t);refreshMenus(t);}
@@ -309,7 +309,7 @@ public final class TaiwanMahjongPlugin extends JavaPlugin implements Listener, C
         if(!practice)ledger.reserve(s.id,Arrays.asList(s.seats),required(t),encode(s));
         t.session=s;System.arraycopy(s.seats,0,t.seats,0,4);System.arraycopy(s.names,0,t.names,0,4);Arrays.fill(t.ready,false);t.revision++;
         broadcast(t,practice?"免費對局開始："+humans+" 位真人＋"+(4-humans)+" 位電腦，不收押金、不扣鑽石。有人離開會由電腦接手。":
-            "鑽石對局開始，每人押金 "+required(t)+" 顆已保管。底 "+rules.baseDiamonds()+"＋每台 "+rules.diamondsPerTai()+" 顆；多響超額按比例分配。超出押金記欠債，結算後強制挑戰 10 隻伏守者；勝利清債＋64鑽石，死亡清債、不噴裝。斷線仍結算。");
+            "鑽石對局開始，每人押金 "+required(t)+" 顆已保管。底 "+rules.baseDiamonds()+"＋每台 "+rules.diamondsPerTai()+" 顆；先用押金，再用麻將帳戶餘額，不扣背包。兩者仍不足才記差額欠債，多響按可付款額比例分配。欠債者結算後挑戰 10 隻伏守者；勝利清債＋64鑽石，死亡清債、不噴裝。斷線仍結算。");
         render(t);refreshMenus(t);notifyTurn(t,true);
     }
     private long deadline(MahjongGame game){boolean own=game.phase()==MahjongGame.Phase.DISCARD||game.phase()==MahjongGame.Phase.DRAW;return System.currentTimeMillis()+1000L*Math.max(5,getConfig().getInt(own?"turn-seconds":"claim-seconds",own?45:12));}
@@ -343,23 +343,31 @@ public final class TaiwanMahjongPlugin extends JavaPlugin implements Listener, C
             if(!s.practice){if(outcome.draw()||dealerWon)s.nextStreak++;else{s.nextStreak=0;s.nextDealer=(t.dealer+1)%4;if(s.nextDealer==0)s.nextWind=(t.roundWind+1)%4;}}
         }
         if(!s.practice){
-            if(s.actualPayments==null){
+            // Quote and commit against the same wallet snapshot. Recalculate
+            // OPEN games on retry; never charge wallets again for settled history.
+            synchronized(ledger){
                 var saved=ledger.game(s.id).orElseThrow(()->new IOException("找不到本局押金帳本，已停止結算。"));
                 if(!saved.players().equals(Arrays.asList(s.seats)))throw new IOException("本局結算座位與押金不一致。");
-                long[] seatCaps=new long[4];
-                for(int i=0;i<4;i++){
-                    Long amount=saved.escrow().get(s.seats[i]);
-                    // Older settled attachments have no actualPayments; amountEach retains their original uniform reserve.
-                    if(amount==null && saved.status()==DiamondLedger.GameStatus.SETTLED)amount=saved.amountEach();
-                    if(amount==null || amount<0)throw new IOException("本局缺少座位押金，已停止結算。");
-                    seatCaps[i]=amount;
+                if(saved.status()==DiamondLedger.GameStatus.SETTLED){
+                    Session committed=decode(saved.attachment());
+                    // Pre-cap historical attachments may not carry actual payments.
+                    s.actualPayments=committed.actualPayments!=null?committed.actualPayments:
+                        EscrowSettlement.cap(outcome.payments(),new long[]{saved.amountEach(),saved.amountEach(),saved.amountEach(),saved.amountEach()});
+                }else{
+                    if(saved.status()!=DiamondLedger.GameStatus.OPEN)throw new IOException("本局已取消，不能結算。");
+                    long[] seatCaps=new long[4];
+                    for(int i=0;i<4;i++){
+                        Long amount=saved.escrow().get(s.seats[i]);
+                        if(amount==null || amount<0)throw new IOException("本局缺少座位押金，已停止結算。");
+                        seatCaps[i]=Math.addExact(amount,ledger.balance(s.seats[i]));
+                    }
+                    s.actualPayments=EscrowSettlement.cap(outcome.payments(),seatCaps);
                 }
-                s.actualPayments=EscrowSettlement.cap(outcome.payments(),seatCaps);
+                List<DiamondLedger.Transfer> transfers=new ArrayList<>();
+                for(var payment:s.actualPayments)if(payment.diamonds()>0)
+                    transfers.add(new DiamondLedger.Transfer(s.seats[payment.fromSeat()],s.seats[payment.toSeat()],payment.diamonds()));
+                ledger.settleWithWallet(s.id,transfers,encode(s));
             }
-            List<DiamondLedger.Transfer> transfers=new ArrayList<>();
-            for(var payment:s.actualPayments)if(payment.diamonds()>0)
-                transfers.add(new DiamondLedger.Transfer(s.seats[payment.fromSeat()],s.seats[payment.toSeat()],payment.diamonds()));
-            ledger.settle(s.id,transfers,encode(s));
             registerArenaDebts(s);
         }
         if(outcome.draw())broadcast(t,"本局流局："+outcome.reason()+(s.practice?"。免費對局不扣鑽石。":"。押金全數退回帳戶。"));
@@ -373,7 +381,7 @@ public final class TaiwanMahjongPlugin extends JavaPlugin implements Listener, C
         }
         for(int i=0;i<outcome.payments().size();i++){
             var theoretical=outcome.payments().get(i);var payment=s.practice?theoretical:s.actualPayments.get(i);
-            String capped=!s.practice && payment.diamonds()!=theoretical.diamonds()?"（原應付 "+theoretical.diamonds()+" 顆；依本局押金上限按比例調整）":"";
+            String capped=!s.practice && payment.diamonds()!=theoretical.diamonds()?"（原應付 "+theoretical.diamonds()+" 顆；押金＋麻將帳戶不足，按可付款額比例分配，未付差額記欠債）":"";
             broadcast(t,s.names[payment.fromSeat()]+" → "+s.names[payment.toSeat()]+"："+payment.tai()+" 台，"+
                 (s.practice?"參考 ":"實付 ")+payment.diamonds()+" 顆鑽石"+(s.practice?"（免費對局，不扣款）":capped));
         }
@@ -509,8 +517,8 @@ public final class TaiwanMahjongPlugin extends JavaPlugin implements Listener, C
         }else if(seat>=0){
             button(m,27,t.ready[seat]?Material.LIME_DYE:Material.YELLOW_DYE,t.ready[seat]?"§a已準備（點擊取消）":"§e準備鑽石對局",q->guard(q,()->ready(q,t)),
                 "§7僅限四位真人都準備才開局","§7底 "+rules.baseDiamonds()+"＋每台 "+rules.diamondsPerTai()+" 顆鑽石",
-                "§e本局押金／每人最多扣："+required(t)+" 顆","§7多響超額時依應付比例分整數","§7未輸掉的全退回帳戶，不抽水",
-                "§c超出押金算欠債，挑戰 10 隻伏守者","§e勝利清債＋64鑽石；死亡清債、不噴裝","§c開局後離線仍會自動打牌、正常結算");
+                "§e本局每人押金："+required(t)+" 顆","§7先扣押金、不足再扣麻將帳戶餘額","§7未輸掉的全退回帳戶，不抽水",
+                "§c押金＋帳戶仍不足才欠債並挑戰 10 隻伏守者","§e勝利清債＋64鑽石；死亡清債、不噴裝","§c開局後離線仍會自動打牌、正常結算");
             int humans=(int)Arrays.stream(t.seats).filter(Objects::nonNull).count();
             button(m,28,Material.WOODEN_SWORD,humans<4?"§a補電腦免費玩":"§a四人免費玩",q->guard(q,()->start(t,true)),
                 "§7現在 "+humans+" 位真人，補 "+(4-humans)+" 位電腦","§a不收押金、不扣鑽石；/mj bots",
@@ -563,11 +571,11 @@ public final class TaiwanMahjongPlugin extends JavaPlugin implements Listener, C
             "§2摸牌與提示\n\n輪到你時，選單點「摸牌」，再點自己的手牌出牌。\n開局莊家已拿十七張，先出牌；補花、槓後補牌自動進行。\n\n畫面下方、牌桌與選單會提示輪到誰。聊天欄會提示棄牌與你的合法吃碰槓胡選項；剛摸到的牌只告訴本人。",
             "§2吃碰槓與胡牌\n\n吃：只能吃上家的牌，選順子組合。\n碰／明槓：合法時顯示按鈕。\n暗槓／加槓：自己回合操作。\n\n胡牌優先於碰槓，碰槓優先於吃；允許一炮多響。\n自摸／胡牌合法才顯示。\n台麻沒有立直。",
             "§2鑽石結算\n\n原應付＝"+bookRules.baseDiamonds()+"＋"+bookRules.diamondsPerTai()+"×台數。\n放槍者付給胡牌者；自摸由其餘三家各付一份。\n莊家相關每筆另計莊連拉：1＋2×連莊次數台。\n\n只限四位真人，全部準備才扣押金。不抽水。",
-            "§2每局押金上限\n\n本局每人押金／最多輸："+bookEscrow+" 顆鑽石。\n\n每位付款者整局最多付出自己的押金。多響超額時，依各筆原應付比例分配整顆鑽石。\n\n結算顯示實付；有封頂會同時顯示原應付。未輸掉的押金全退帳戶，不抽水。",
+            "§2押金與帳戶付款\n\n本局每人押金："+bookEscrow+" 顆鑽石。\n\n先扣押金，不足再扣麻將帳戶餘額；不自動扣背包。兩者仍不足時，按各筆應付比例分配現有鑽石，只有差額算欠債。\n\n結算顯示實付；不足時同時顯示原應付。未輸掉的押金全退帳戶，不抽水。",
             "§2帳戶與離線\n\n/mj deposit 數量：存鑽石\n/mj withdraw 數量：領回\n/mj balance：查餘額\n選單可一鍵存／領 "+required(current)+" 顆。\n\n只收原版鑽石，不收裝飾寶石。鑽石局不能中途退款；逾時與離線會自動出牌，押金仍結算。重啟後恢復已保存牌局。",
             "§2補電腦免費玩\n\n1～3 位真人先入座，用 /mj bots 或選單免費按鈕補齊空位；4 位真人也能選免費玩。\n\n所有真人須在線並靠近牌桌。免費局不收押金、不扣鑽石，電腦不參加鑽石賭局。\n\n有人離開或斷線由電腦接手；最後一位真人離開才結束免費局。",
-            "§2天空還債挑戰\n\n新鑽石局應付超過押金，差額記欠債，強制送進天空競技場。\n\n擊敗十隻伏守者：清除欠債，64 顆獎勵存入麻將帳戶。\n死亡：清除欠債，不掉裝備、背包與經驗。\n\n排隊與斷線不清債，回來繼續。免費局不觸發。",
-            "§2觀看與獎勵\n\n/mj arena watch：到觀眾席\n/mj arena leave：離開看台\n/mj arena status：查欠債\n\n觀眾不能干擾戰鬥。\n勝利獎勵用 /mj withdraw 64 領取；背包放不下可稍後領。\n胡牌方僅分配原押金，超額欠債不額外補發。",
+            "§2天空還債挑戰\n\n鑽石局應付超過押金＋麻將帳戶餘額，才把未付差額記欠債並送進天空競技場；剛好付清不算欠債。\n\n擊敗十隻伏守者：清除欠債，64 顆獎勵存入麻將帳戶。\n死亡：清除欠債，不掉裝備、背包與經驗。\n\n排隊與斷線不清債，回來繼續。免費局不觸發。",
+            "§2觀看與獎勵\n\n/mj arena watch：到觀眾席\n/mj arena leave：離開看台\n/mj arena status：查欠債\n\n觀眾不能干擾戰鬥。\n勝利獎勵用 /mj withdraw 64 領取；背包放不下可稍後領。\n胡牌方分配押金與帳戶實際付出的鑽石；欠債部分不額外補發。",
             "§2常見台型\n\n門清 1、自摸 1\n門清自摸合計 3\n平胡 2、碰碰胡 4\n混一色 4、清一色 8\n字一色 16\n三暗刻 2、四暗刻 5、五暗刻 8（只取最高）\n獨聽 1、全求 2\n零台：仍可胡，收底。",
             "§2字牌與花牌\n\n中／發／白刻各 1\n門風、圈風刻各 1\n小三元 4、大三元 8\n小四喜 8、大四喜 16\n大／小三元不再加三元刻；大／小四喜不再加風刻。\n正花各 1，春夏秋冬或梅蘭竹菊花槓各 2。",
             "§2特殊胡法\n\n天胡 16、地胡 16、人胡 8\n七搶一 8、八仙過海 8\n四槓胡 8\n搶槓 1、槓上／補花自摸 1\n海底撈月／河底胡 1\n\n144 張含花，保留最後 16 張。無可摸牌時流局。\n天胡／地胡／人胡不重複計門清自摸。",

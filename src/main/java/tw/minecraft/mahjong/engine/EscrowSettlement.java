@@ -4,7 +4,7 @@ import java.math.BigInteger;
 import java.util.*;
 import tw.minecraft.mahjong.engine.MahjongGame.Payment;
 
-/** Proportionally limits each payer's gross liability to that seat's actual escrow. */
+/** Proportionally limits each payer's gross liability to that seat's available funds. */
 public final class EscrowSettlement {
     private EscrowSettlement() { }
 
@@ -12,7 +12,7 @@ public final class EscrowSettlement {
      * Keeps original order, seat identities and tai; only diamond amounts change.
      * Each payer is apportioned independently using exact largest remainders.
      * Tied remainders go to the earlier original payment. Zero payments remain.
-     * Use the current game's recorded escrow, not the latest configuration.
+     * The caller supplies recorded escrow plus any allowed wallet balance, never a configured stake.
      */
     public static List<Payment> cap(List<Payment> payments, long[] seatCaps) {
         Objects.requireNonNull(payments, "payments");

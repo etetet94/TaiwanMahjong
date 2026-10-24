@@ -15,7 +15,7 @@
 - 1～4 位真人皆可免費練習；缺少的位置由電腦補齊。
 - 四位真人可使用原版鑽石下注，預設底 5 顆、每台 2 顆、每人押金 5 顆。
 - 帳本與付費牌局持久化；存領交易有回執、崩潰復原與重複結算保護。
-- 超出押金的應付額會排入天空競技場：挑戰十隻伏守者，勝利清除欠債並獲得 64 顆鑽石；死亡也清債，保留裝備與經驗。支援觀眾席。
+- 先用押金、不足再用麻將帳戶餘額付款；兩者仍不足才把未付差額記欠債、排入天空競技場：挑戰十隻伏守者，勝利清除欠債並獲得 64 顆鑽石；死亡也清債，保留裝備與經驗。支援觀眾席。
 - 不需要客戶端模組；圖片牌面使用由伺服器提供的資源包。
 
 這是台灣十六張規則，不包含日式立直、十四張七對子或國士無雙。實際台型與結算說明見 `/mj rules` 及 [玩法文件](docs/使用說明.txt)；各地家規不一定相同。
@@ -23,7 +23,7 @@
 ## 安裝
 
 1. 準備 Paper 26.3 與 Java 25。
-2. 從 Releases 下載 `TaiwanMahjong-1.1.2.jar`，放進伺服器的 `plugins/`。
+2. 從 Releases 下載 `TaiwanMahjong-1.1.3.jar`，放進伺服器的 `plugins/`。
 3. 安裝下方資源包，然後正常啟動或重啟伺服器。
 4. 輸入 `/mj list`，或右鍵牌桌空位入座。輸入 `/mj practice` 開始免費練習。
 
@@ -31,7 +31,7 @@
 
 不依賴其他插件。GravesX、EliteMobs、ValhallaMMO 為可選整合；不隨本專案提供。
 
-從舊版更新時，既有設定檔不會被覆蓋。若要使用 5 顆押金，請將 `plugins/TaiwanMahjong/config.yml` 的 `escrow-diamonds-per-player` 設為 `5`，再正常重啟。已開始的付費牌局保留其原押金。
+從舊版更新時，既有設定檔不會被覆蓋。若要使用 5 顆押金，請將 `plugins/TaiwanMahjong/config.yml` 的 `escrow-diamonds-per-player` 設為 `5`，再正常重啟。已開始的付費牌局保留其原押金，未結算牌局套用押金＋帳戶付款。已結算帳目與既有欠債不追溯重算。
 
 ### 讓玩家進服自動載入牌面
 
@@ -78,7 +78,7 @@ resource-pack-prompt={"text":"請接受資源包，以顯示傳統麻將圖片�
 mvn -B -ntp clean verify
 ```
 
-產物為 `target/TaiwanMahjong-1.1.2.jar`。Paper API 僅作為編譯依賴，不會打包進插件。版本固定為 `26.3.build.200-stable`，設定方式依循 [Paper 專案建置文件](https://docs.papermc.io/paper/dev/project-setup/)。
+產物為 `target/TaiwanMahjong-1.1.3.jar`。Paper API 僅作為編譯依賴，不會打包進插件。版本固定為 `26.3.build.200-stable`，設定方式依循 [Paper 專案建置文件](https://docs.papermc.io/paper/dev/project-setup/)。
 
 Maven 會執行七組既有回歸測試，包括隨機牌局、手動摸牌、押金分配、帳本模型、崩潰復原、玩家檔回執與競技場欠債復原。測試資料使用臨時資料夾與虛構玩家識別碼。
 

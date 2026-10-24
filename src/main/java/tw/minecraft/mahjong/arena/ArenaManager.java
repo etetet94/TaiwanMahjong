@@ -76,7 +76,7 @@ public final class ArenaManager implements Listener, AutoCloseable {
         Ticket ticket=store.enroll(gameId,player,debt);
         if(ticket.returned())return;
         Player online=Bukkit.getPlayer(player);
-        if(online!=null)message(online,"本局超出押金的 "+debt+" 顆鑽石列為競技場欠款。輪到你時將挑戰 10 隻伏守者；死亡也清債並保留物品。");
+        if(online!=null)message(online,"本局押金＋麻將帳戶仍不足支付，未付的 "+debt+" 顆鑽石列為競技場欠款。輪到你時將挑戰 10 隻伏守者；死亡也清債並保留物品。");
     }
 
     public boolean hasDebt(UUID player){return store!=null&&store.hasUnresolved(player);}
