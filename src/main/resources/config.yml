@@ -3,7 +3,7 @@ base-diamonds: 5
 diamonds-per-tai: 2
 # 每局先保管押金，結算後未使用金額留在個人帳戶，可隨時領回。
 # 每人單局總付款以當局押金為上限；一炮多響超額時按比例分配整數鑽石。
-escrow-diamonds-per-player: 32
+escrow-diamonds-per-player: 5
 turn-seconds: 45
 claim-seconds: 12
 max-tables: 2

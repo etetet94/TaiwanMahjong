@@ -9,6 +9,7 @@ public final class EscrowSettlementTest {
     private static int checks;
     public static void main(String[] args) {
         List<Payment> triple = List.of(p(0,1,133,64), p(0,2,133,64), p(0,3,133,64));
+        amounts(EscrowSettlement.cap(triple, caps(5)), 2,2,1);
         amounts(EscrowSettlement.cap(triple, caps(32)), 11,11,10);
         amounts(EscrowSettlement.cap(triple, caps(512)), 133,133,133);
         amounts(EscrowSettlement.cap(triple, caps(399)), 133,133,133);

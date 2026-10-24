@@ -256,7 +256,7 @@ public final class TaiwanMahjongPlugin extends JavaPlugin implements Listener, C
         tell(p,"已入座。/mj bots 補電腦免費玩。四位真人都準備才開鑽石局，最多扣 "+required(t)+" 顆押金；超額欠債須挑戰 10 隻伏守者，勝利清債＋64鑽石、死亡清債且保留物品。");
     }
     private long required(Table t){
-        Object configured=getConfig().get("escrow-diamonds-per-player",32);
+        Object configured=getConfig().get("escrow-diamonds-per-player",5);
         if(!(configured instanceof Number number) || number.doubleValue()!=number.longValue() || number.longValue()<1 || number.longValue()>MAX_ESCROW_DIAMONDS)
             throw new IllegalArgumentException("每人押金 escrow-diamonds-per-player 必須為 1～"+MAX_ESCROW_DIAMONDS+" 的整數。");
         return number.longValue();
@@ -520,8 +520,9 @@ public final class TaiwanMahjongPlugin extends JavaPlugin implements Listener, C
             button(m,36+i,Material.OAK_STAIRS,wind+"位："+name,q->guard(q,()->join(q,t,pos)),"§7"+(g==null?(t.ready[i]?"已準備":"等待準備"):"棄牌："+String.join(" ",labels(g.discards(i)))));}
         button(m,41,Material.BOOK,"§e玩法／胡牌台型",this::rulesBook);
         button(m,46,Material.SPYGLASS,"§b天空競技場觀眾席",q->guard(q,()->arena.command(q,new String[]{"watch"})),"§7觀看欠債者挑戰十隻伏守者","§7離開：/mj arena leave");
-        button(m,42,Material.DIAMOND,"§b存入 32 顆原版鑽石",q->guard(q,()->{diamonds.transfer(q,32,true);show(q,t);}),"§7也可 /mj deposit 數量");
-        button(m,43,Material.HOPPER,"§b領回 32 顆鑽石",q->guard(q,()->{diamonds.transfer(q,32,false);show(q,t);}),"§7也可 /mj withdraw 數量");
+        int quickAmount=Math.toIntExact(required(t));
+        button(m,42,Material.DIAMOND,"§b存入 "+quickAmount+" 顆原版鑽石",q->guard(q,()->{diamonds.transfer(q,quickAmount,true);show(q,t);}),"§7也可 /mj deposit 數量");
+        button(m,43,Material.HOPPER,"§b領回 "+quickAmount+" 顆鑽石",q->guard(q,()->{diamonds.transfer(q,quickAmount,false);show(q,t);}),"§7也可 /mj withdraw 數量");
         button(m,44,Material.CHEST,"§b可領餘額："+ledger.balance(p.getUniqueId()),null);
         if(seat>=0)button(m,45,Material.OAK_DOOR,"§c離開牌桌",q->guard(q,()->leave(q,t)));
         button(m,49,Material.CLOCK,g==null?"補電腦免費玩／四真人鑽石局":"§e"+turnText(s),null,g==null?"§7點左側免費按鈕即可補齊空位":"§7剩餘可摸牌："+g.remainingWall(),
@@ -563,7 +564,7 @@ public final class TaiwanMahjongPlugin extends JavaPlugin implements Listener, C
             "§2吃碰槓與胡牌\n\n吃：只能吃上家的牌，選順子組合。\n碰／明槓：合法時顯示按鈕。\n暗槓／加槓：自己回合操作。\n\n胡牌優先於碰槓，碰槓優先於吃；允許一炮多響。\n自摸／胡牌合法才顯示。\n台麻沒有立直。",
             "§2鑽石結算\n\n原應付＝"+bookRules.baseDiamonds()+"＋"+bookRules.diamondsPerTai()+"×台數。\n放槍者付給胡牌者；自摸由其餘三家各付一份。\n莊家相關每筆另計莊連拉：1＋2×連莊次數台。\n\n只限四位真人，全部準備才扣押金。不抽水。",
             "§2每局押金上限\n\n本局每人押金／最多輸："+bookEscrow+" 顆鑽石。\n\n每位付款者整局最多付出自己的押金。多響超額時，依各筆原應付比例分配整顆鑽石。\n\n結算顯示實付；有封頂會同時顯示原應付。未輸掉的押金全退帳戶，不抽水。",
-            "§2帳戶與離線\n\n/mj deposit 數量：存鑽石\n/mj withdraw 數量：領回\n/mj balance：查餘額\n選單可一鍵存／領 32 顆。\n\n只收原版鑽石，不收裝飾寶石。鑽石局不能中途退款；逾時與離線會自動出牌，押金仍結算。重啟後恢復已保存牌局。",
+            "§2帳戶與離線\n\n/mj deposit 數量：存鑽石\n/mj withdraw 數量：領回\n/mj balance：查餘額\n選單可一鍵存／領 "+required(current)+" 顆。\n\n只收原版鑽石，不收裝飾寶石。鑽石局不能中途退款；逾時與離線會自動出牌，押金仍結算。重啟後恢復已保存牌局。",
             "§2補電腦免費玩\n\n1～3 位真人先入座，用 /mj bots 或選單免費按鈕補齊空位；4 位真人也能選免費玩。\n\n所有真人須在線並靠近牌桌。免費局不收押金、不扣鑽石，電腦不參加鑽石賭局。\n\n有人離開或斷線由電腦接手；最後一位真人離開才結束免費局。",
             "§2天空還債挑戰\n\n新鑽石局應付超過押金，差額記欠債，強制送進天空競技場。\n\n擊敗十隻伏守者：清除欠債，64 顆獎勵存入麻將帳戶。\n死亡：清除欠債，不掉裝備、背包與經驗。\n\n排隊與斷線不清債，回來繼續。免費局不觸發。",
             "§2觀看與獎勵\n\n/mj arena watch：到觀眾席\n/mj arena leave：離開看台\n/mj arena status：查欠債\n\n觀眾不能干擾戰鬥。\n勝利獎勵用 /mj withdraw 64 領取；背包放不下可稍後領。\n胡牌方僅分配原押金，超額欠債不額外補發。",
@@ -581,4 +582,3 @@ public final class TaiwanMahjongPlugin extends JavaPlugin implements Listener, C
         catch(ClassNotFoundException|ClassCastException ex){throw new IOException("無法恢復麻將牌局",ex);}
     }
 }
-
