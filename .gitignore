@@ -1,0 +1,27 @@
+/target/
+/resource-pack/dist/
+/resource-pack/pack/
+.idea/
+.vscode/
+*.iml
+*.log
+*.pid
+.DS_Store
+Thumbs.db
+__pycache__/
+.venv/
+# Never add runtime world/player data, credentials or server distributions.
+/server/
+/plugins/
+/world*/
+/backups/
+.env
+.env.*
+*.dat
+*.dat.tmp
+*.dat.lock
+*.toml
+bank-tests-*/
+bank-properties-*/
+receipt-tests-*/
+arena-store-tests-*/

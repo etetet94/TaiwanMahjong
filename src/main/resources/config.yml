@@ -1,0 +1,12 @@
+# 台灣 16 張；金額只使用遊戲內原版鑽石。
+base-diamonds: 5
+diamonds-per-tai: 2
+# 每局先保管押金，結算後未使用金額留在個人帳戶，可隨時領回。
+# 每人單局總付款以當局押金為上限；一炮多響超額時按比例分配整數鑽石。
+escrow-diamonds-per-player: 32
+turn-seconds: 45
+claim-seconds: 12
+max-tables: 2
+interaction-distance: 8.0
+# 第一次啟用，在主世界出生點附近建立一張不破壞方塊的展示牌桌。
+create-first-table: true

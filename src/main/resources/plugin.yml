@@ -1,0 +1,20 @@
+name: TaiwanMahjong
+version: ${project.version}
+main: tw.minecraft.mahjong.TaiwanMahjongPlugin
+api-version: '26.3'
+description: 繁體中文台灣十六張實體麻將桌
+author: etetet94
+softdepend: [GravesX, EliteMobs, ValhallaMMO]
+commands:
+  mahjong:
+    aliases: [mj, 麻將]
+    description: 麻將牌桌、鑽石帳戶與玩法
+    usage: /mj help
+    permission: taiwanmahjong.play
+permissions:
+  taiwanmahjong.play:
+    default: true
+    description: 加入麻將桌及使用自己的鑽石帳戶
+  taiwanmahjong.admin:
+    default: op
+    description: 建立與移除無進行中對局的牌桌

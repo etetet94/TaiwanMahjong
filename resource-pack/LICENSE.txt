@@ -1,0 +1,28 @@
+TaiwanMahjong resource pack — asset provenance and licenses
+
+Tiles 0–33: FluffyStuff / riichi-mahjong-tiles, Export/Regular PNG pictograms.
+Source: https://github.com/FluffyStuff/riichi-mahjong-tiles
+License: CC0 1.0 Universal / public domain.
+https://creativecommons.org/publicdomain/zero/1.0/
+The upstream notice is also preserved at source/LICENSE-CC0.txt.
+Original upstream archive SHA256:
+c21294aee297127f29e19462475c64a1c5ed36049be317700c027acee2dff3e1
+
+Original upstream license statement:
+This work is in the public domain. For more information, visit
+https://creativecommons.org/publicdomain/zero/1.0/.
+
+Tiles 34–41: original deterministic illustrations in tools/build-resource-pack.py.
+Tile bodies, borders, composition and original bonus illustrations are dedicated
+to the public domain under CC0 1.0 Universal.
+
+Bonus-tile corner labels and preview text are rendered using Noto Sans CJK TC,
+Regular, version 2.004. Font copyright: © 2014–2021 Adobe (http://www.adobe.com/).
+The font software is licensed under the SIL Open Font License 1.1; it is not CC0.
+Source: https://github.com/notofonts/noto-cjk
+The full license is in fonts/OFL.txt in the source distribution and OFL.txt in
+the built resource pack. The font software is vendored for reproducible builds
+but is not embedded in the built Minecraft resource-pack ZIP.
+
+Haku (white dragon) intentionally retains the upstream blank face.
+Project: https://github.com/etetet94/TaiwanMahjong
