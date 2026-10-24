@@ -1,5 +1,7 @@
 package tw.minecraft.mahjong.arena;
 
+import static tw.minecraft.mahjong.arena.ArenaDebtStore.TARGET_DEFEATS;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -61,7 +63,10 @@ public final class ArenaManager implements Listener, AutoCloseable {
         sky.ensureBuilt();
         loadWatchers();
         // The same obligation and original return point survive shutdowns and disconnects.
-        for(Ticket ticket:store.tickets())if(ticket.status()==Status.ACTIVE)store.queue(ticket.id());
+        for(Ticket ticket:store.tickets()){
+            if(!terminal(ticket)&&ticket.defeated().size()>=TARGET_DEFEATS)store.resolve(ticket.id(),true);
+            else if(ticket.status()==Status.ACTIVE)store.queue(ticket.id());
+        }
         cleanupOwnedEntities();
         Bukkit.getPluginManager().registerEvents(this,plugin);
         installGraveGuard();
@@ -76,7 +81,7 @@ public final class ArenaManager implements Listener, AutoCloseable {
         Ticket ticket=store.enroll(gameId,player,debt);
         if(ticket.returned())return;
         Player online=Bukkit.getPlayer(player);
-        if(online!=null)message(online,"本局押金＋麻將帳戶仍不足支付，未付的 "+debt+" 顆鑽石列為競技場欠款。輪到你時將挑戰 10 隻伏守者；死亡也清債並保留物品。");
+        if(online!=null)message(online,"本局押金＋麻將帳戶仍不足支付，未付的 "+debt+" 顆鑽石列為競技場欠款。輪到你時將挑戰 "+TARGET_DEFEATS+" 隻伏守者；死亡也清債並保留物品。");
     }
 
     public boolean hasDebt(UUID player){return store!=null&&store.hasUnresolved(player);}
@@ -89,14 +94,14 @@ public final class ArenaManager implements Listener, AutoCloseable {
             switch(action){
                 case "watch","spectate" -> watch(player);
                 case "leave" -> {
-                    if(isFighter(player))message(player,"挑戰中不能離場；擊敗 10 隻伏守者或死亡即可清債。離線只會暫停。");
+                    if(isFighter(player))message(player,"挑戰中不能離場；擊敗 "+TARGET_DEFEATS+" 隻伏守者或死亡即可清債。離線只會暫停。");
                     else if(watchers.containsKey(player.getUniqueId()))leaveWatch(player);
                     else message(player,"你目前沒有觀戰。");
                 }
                 case "status" -> {
                     Optional<Ticket> ticket=store.tickets().stream().filter(t->t.player().equals(player.getUniqueId())&&!t.returned()).findFirst();
                     if(ticket.isPresent()){
-                        Ticket t=ticket.get();message(player,"欠款 "+t.debt()+" 顆｜已擊敗 "+t.defeated().size()+"/10｜"+statusName(t.status()));
+                        Ticket t=ticket.get();message(player,"欠款 "+t.debt()+" 顆｜已擊敗 "+t.defeated().size()+"/"+TARGET_DEFEATS+"｜"+statusName(t.status()));
                     }else message(player,"目前沒有競技場欠款。");
                     message(player,"/mj arena watch 觀戰；/mj arena leave 返回。勝利獎勵 64 顆存入麻將錢包。");
                     if(faulted)message(player,"競技場存檔發生錯誤，已暫停並保留紀錄，請通知管理員。");
@@ -122,16 +127,16 @@ public final class ArenaManager implements Listener, AutoCloseable {
                 if(ticket.status()!=Status.ACTIVE){clearFight();return;}
                 if(fighter==null||!fighter.isOnline()){pauseFight();return;}
                 if(fighter.isDead())return; // PlayerDeathEvent resolves it; never penalize a disconnected player.
-                if(ticket.defeated().size()==10){resolveFight(true);return;}
+                if(ticket.defeated().size()>=TARGET_DEFEATS){resolveFight(true);return;}
                 enforceFighter(fighter);
                 wardens.values().removeIf(w->w.isDead()||!w.isValid());
-                int missing=10-ticket.defeated().size()-wardens.size();
+                int missing=TARGET_DEFEATS-ticket.defeated().size()-wardens.size();
                 if(missing>0)spawnWardens(ticket,fighter,missing);
                 for(Warden warden:wardens.values()){
-                    if(!sky.containsFight(warden.getLocation()))teleport(warden,sky.wardenSpawns().get(Math.floorMod(warden.getEntityId(),10)));
+                    if(!sky.containsFight(warden.getLocation()))teleport(warden,sky.wardenSpawns().get(Math.floorMod(warden.getEntityId(),sky.wardenSpawns().size())));
                     warden.setAnger(fighter,150);warden.setTarget(fighter);warden.setRemoveWhenFarAway(false);
                 }
-                fighter.sendActionBar(net.kyori.adventure.text.Component.text("競技場："+ticket.defeated().size()+"/10 隻伏守者｜欠款 "+ticket.debt()+" 顆"));
+                fighter.sendActionBar(net.kyori.adventure.text.Component.text("競技場："+ticket.defeated().size()+"/"+TARGET_DEFEATS+" 隻伏守者｜欠款 "+ticket.debt()+" 顆"));
             }else{
                 for(Ticket ticket:store.tickets())if(ticket.status()==Status.QUEUED){
                     Player player=Bukkit.getPlayer(ticket.player());
@@ -144,6 +149,10 @@ public final class ArenaManager implements Listener, AutoCloseable {
     }
 
     private void start(Ticket ticket,Player player)throws IOException{
+        if(ticket.defeated().size()>=TARGET_DEFEATS){
+            store.resolve(ticket.id(),true);
+            completeReturn(store.find(ticket.id()).orElseThrow());return;
+        }
         if(watchers.containsKey(player.getUniqueId()))leaveWatch(player);
         sky.ensureBuilt();
         releaseSeat.accept(player.getUniqueId());
@@ -155,8 +164,8 @@ public final class ArenaManager implements Listener, AutoCloseable {
             if(!teleport(player,sky.spawn()))throw new IOException("競技場傳送被其他插件拒絕");
             player.saveData();
             Ticket current=store.find(ticket.id()).orElseThrow();
-            spawnWardens(current,player,10-current.defeated().size());
-            message(player,"開始 20×20 競技場挑戰！擊敗 10 隻伏守者：清債並獲得 64 顆鑽石；死亡：清債、保留物品與經驗。");
+            spawnWardens(current,player,TARGET_DEFEATS-current.defeated().size());
+            message(player,"開始 20×20 競技場挑戰！擊敗 "+TARGET_DEFEATS+" 隻伏守者：清債並獲得 64 顆鑽石；死亡：清債、保留物品與經驗。");
             Bukkit.broadcast(net.kyori.adventure.text.Component.text("[麻將競技場] "+player.getName()+" 正在挑戰伏守者！/mj arena watch 可免費觀戰。"));
         }catch(IOException|RuntimeException ex){
             store.queue(ticket.id());clearFight();restoreState(player,store.find(ticket.id()).orElseThrow().returnPoint());
@@ -167,7 +176,7 @@ public final class ArenaManager implements Listener, AutoCloseable {
     private void spawnWardens(Ticket ticket,Player fighter,int amount)throws IOException{
         List<Location> spawns=sky.wardenSpawns();
         for(int i=0;i<amount;i++){
-            int index=(ticket.defeated().size()+wardens.size())%10;
+            int index=(ticket.defeated().size()+wardens.size())%spawns.size();
             Warden warden=sky.world().spawn(spawns.get(index),Warden.class,CreatureSpawnEvent.SpawnReason.CUSTOM,created->{
                 created.getPersistentDataContainer().set(mobKey,PersistentDataType.STRING,ticket.id());
                 created.addScoreboardTag(TAG);
@@ -376,7 +385,7 @@ public final class ArenaManager implements Listener, AutoCloseable {
         if(activeTicket==null||!activeTicket.equals(ticket)||!wardens.containsKey(event.getEntity().getUniqueId()))return;
         try{
             store.defeat(ticket,event.getEntity().getUniqueId());wardens.remove(event.getEntity().getUniqueId());
-            if(store.find(ticket).orElseThrow().defeated().size()==10)resolveFight(true);
+            if(store.find(ticket).orElseThrow().defeated().size()>=TARGET_DEFEATS)resolveFight(true);
         }catch(IOException|RuntimeException ex){failure(ex);}
     }
 

@@ -1,7 +1,10 @@
 package tw.minecraft.mahjong.arena;
 
+import static tw.minecraft.mahjong.arena.ArenaDebtStore.TARGET_DEFEATS;
+
 import java.io.*;
 import java.nio.file.*;
+import java.security.MessageDigest;
 import java.util.*;
 import tw.minecraft.mahjong.arena.ArenaDebtStore.*;
 import tw.minecraft.mahjong.bank.DiamondLedger;
@@ -16,17 +19,19 @@ public final class ArenaDebtStoreTest {
             ArenaDebtStore store=new ArenaDebtStore(directory.resolve("crash-arena.dat"));
             Ticket partial=store.enroll("hard-crash",PLAYER,500);
             store.activate(partial.id(),ORIGINAL);
-            for(int i=0;i<3;i++)store.defeat(partial.id(),new UUID(10,i));
+            store.defeat(partial.id(),new UUID(10,0));
             Ticket winner=store.enroll("reward-crash",OTHER,900);
             store.activate(winner.id(),ORIGINAL);
-            for(int i=0;i<10;i++)store.defeat(winner.id(),new UUID(20,i));
+            for(int i=0;i<TARGET_DEFEATS;i++)store.defeat(winner.id(),new UUID(20,i));
             store.resolve(winner.id(),true);
             DiamondLedger ledger=new DiamondLedger(directory.resolve("crash-wallet.dat"));
             ledger.credit(OTHER,64,"arena-win:"+winner.id());
             Runtime.getRuntime().halt(0); // Crash after reward, before markReturned; no graceful cleanup.
         }
         Path directory=Files.createTempDirectory(args.length>0?Path.of(args[0]):Path.of("."),"arena-store-tests-");
+        check(TARGET_DEFEATS==2,"Challenge requires exactly two Warden defeats");
         normal(directory.resolve("normal.dat"));
+        legacyProgress(directory.resolve("legacy.dat"));
         rollback(directory.resolve("rollback.dat"));
         crash(directory);
         randomized(directory.resolve("random.dat"));
@@ -56,8 +61,8 @@ public final class ArenaDebtStoreTest {
             check(store.find(id).orElseThrow().defeated().size()==1,"Queue preserves kills");
             check(store.activate(id,new ReturnPoint(WORLD,200,220,200,0,0,"ADVENTURE",false,false,false)),"Resume activates");
             check(store.find(id).orElseThrow().returnPoint().equals(ORIGINAL),"Resume does not overwrite original location/state");
-            for(int i=2;i<=10;i++)store.defeat(id,new UUID(10,i));
-            check(!store.defeat(id,new UUID(10,11))&&store.find(id).orElseThrow().defeated().size()==10,"Progress capped at ten");
+            check(store.defeat(id,new UUID(10,2)),"Second distinct Warden completes challenge");
+            check(!store.defeat(id,new UUID(10,3))&&store.find(id).orElseThrow().defeated().size()==2,"New progress capped at two");
             check(store.resolve(id,true)&&!store.resolve(id,true),"Victory resolved exactly once");
             check(!store.queue(id),"Terminal queue cannot resurrect");
             expect(IllegalStateException.class,()->store.resolve(id,false));
@@ -69,7 +74,7 @@ public final class ArenaDebtStoreTest {
         }
         try(ArenaDebtStore store=new ArenaDebtStore(file)){
             Ticket ticket=store.find(id).orElseThrow();
-            check(ticket.status()==Status.WON&&ticket.defeated().size()==10&&!ticket.returned(),"Pending return survives reload");
+            check(ticket.status()==Status.WON&&ticket.defeated().size()==2&&!ticket.returned(),"Two-Warden victory and pending return survive reload");
             check(ticket.returnPoint().equals(ORIGINAL),"Full original state survives reload");
             check(store.markReturned(id)&&!store.markReturned(id),"Returned marker idempotent");
             check(!store.hasUnresolved(PLAYER),"Completed ticket no longer blocks player");
@@ -83,6 +88,51 @@ public final class ArenaDebtStoreTest {
         }
         expect(IllegalArgumentException.class,()->new ReturnPoint(WORLD,Double.NaN,1,1,0,0,"SURVIVAL",false,false,false));
         expect(IllegalArgumentException.class,()->new ReturnPoint(WORLD,1,1,1,0,0,"UNKNOWN",false,false,false));
+    }
+    private static void legacyProgress(Path file)throws Exception {
+        // Preserve the original version-one snapshot layout and all historical defeat IDs.
+        List<Ticket> legacy=List.of(
+                new Ticket("legacy-one","legacy-game-one",PLAYER,40,Status.QUEUED,ORIGINAL,defeats(1),false),
+                new Ticket("legacy-two","legacy-game-two",PLAYER,40,Status.QUEUED,ORIGINAL,defeats(2),false),
+                new Ticket("legacy-five","legacy-game-five",PLAYER,40,Status.ACTIVE,ORIGINAL,defeats(5),false),
+                new Ticket("legacy-won","legacy-game-won",OTHER,40,Status.WON,ORIGINAL,defeats(10),false),
+                new Ticket("legacy-lost","legacy-game-lost",OTHER,40,Status.LOST,ORIGINAL,defeats(10),true));
+        LinkedHashMap<String,Ticket> snapshot=new LinkedHashMap<>();
+        for(Ticket ticket:legacy)snapshot.put(ticket.id(),ticket);
+        ByteArrayOutputStream buffer=new ByteArrayOutputStream();
+        try(ObjectOutputStream output=new ObjectOutputStream(buffer)){output.writeObject(snapshot);}
+        byte[] bytes=buffer.toByteArray();
+        try(DataOutputStream output=new DataOutputStream(Files.newOutputStream(file))){
+            output.writeInt(0x4D4A4152);output.writeInt(1);output.writeInt(bytes.length);
+            output.write(MessageDigest.getInstance("SHA-256").digest(bytes));output.write(bytes);
+        }
+        try(ArenaDebtStore store=new ArenaDebtStore(file)){
+            check(store.tickets().equals(legacy),"Legacy queued, active and terminal tickets read without losing progress");
+            expect(IllegalStateException.class,()->store.resolve("legacy-one",true));
+            store.activate("legacy-one",null);
+            check(store.defeat("legacy-one",new UUID(41,1))&&store.resolve("legacy-one",true),
+                    "Legacy one-defeat challenge only needs one additional Warden");
+            check(store.resolve("legacy-two",true),"Queued legacy challenge at the new target can resolve without another fight");
+            check(!store.defeat("legacy-five",new UUID(41,2)),"Legacy progress above the new target cannot add more defeats");
+            store.queue("legacy-five");store.activate("legacy-five",null);
+            check(store.resolve("legacy-five",true)&&store.find("legacy-five").orElseThrow().defeated().equals(defeats(5)),
+                    "Active legacy challenge above the target wins with all original progress preserved");
+            check(!store.resolve("legacy-won",true)&&store.find("legacy-won").orElseThrow().defeated().equals(defeats(10)),
+                    "Historical ten-Warden winner remains valid and resolution is idempotent");
+            check(store.markReturned("legacy-won"),"Historical winner can finish its pending return");
+        }
+        try(ArenaDebtStore store=new ArenaDebtStore(file)){
+            check(store.find("legacy-two").orElseThrow().status()==Status.WON
+                    &&store.find("legacy-five").orElseThrow().status()==Status.WON,"Legacy victories survive reopening");
+            check(store.find("legacy-won").orElseThrow().defeated().size()==10
+                    &&store.find("legacy-won").orElseThrow().returned()
+                    &&store.find("legacy-lost").orElseThrow().defeated().size()==10,"Historical ten-defeat records survive later commits");
+        }
+        expect(IllegalArgumentException.class,()->new Ticket("too-few","validation",PLAYER,1,Status.WON,ORIGINAL,defeats(1),false));
+        expect(IllegalArgumentException.class,()->new Ticket("too-many","validation",PLAYER,1,Status.ACTIVE,ORIGINAL,defeats(11),false));
+    }
+    private static Set<UUID> defeats(int amount){
+        Set<UUID> result=new LinkedHashSet<>();for(int i=0;i<amount;i++)result.add(new UUID(40,i));return result;
     }
     private static void rollback(Path file)throws Exception {
         String id;
@@ -99,13 +149,13 @@ public final class ArenaDebtStoreTest {
         }
     }
     private static void crash(Path directory)throws Exception {
-        String java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java").toString();
-        Process process=new ProcessBuilder(java,"-cp",System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")),ArenaDebtStoreTest.class.getName(),"crash-worker",directory.toString()).inheritIO().start();
+        String java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name").startsWith("Windows")?"java.exe":"java").toString();
+        Process process=new ProcessBuilder(java,"-cp",System.getProperty("surefire.test.class.path",System.getProperty("java.class.path")),ArenaDebtStoreTest.class.getName(),"crash-worker",directory.toString()).inheritIO().start();
         check(process.waitFor()==0,"Crash worker committed changes");
         Files.write(directory.resolve("crash-arena.dat.tmp"),new byte[]{1,2,3});
         try(ArenaDebtStore store=new ArenaDebtStore(directory.resolve("crash-arena.dat"));DiamondLedger ledger=new DiamondLedger(directory.resolve("crash-wallet.dat"))){
             Ticket partial=store.enroll("hard-crash",PLAYER,500);
-            check(partial.status()==Status.ACTIVE&&partial.defeated().size()==3,"Hard crash retains active progress");
+            check(partial.status()==Status.ACTIVE&&partial.defeated().size()==1,"Hard crash retains incomplete one-Warden progress");
             store.queue(partial.id());store.activate(partial.id(),null);
             check(store.find(partial.id()).orElseThrow().returnPoint().equals(ORIGINAL),"Crash resume retains original point");
             Ticket won=store.enroll("reward-crash",OTHER,900);
@@ -120,7 +170,7 @@ public final class ArenaDebtStoreTest {
         try(ArenaDebtStore store=new ArenaDebtStore(file)){
             for(int game=0;game<40;game++){
                 UUID player=new UUID(100,game);Ticket ticket=store.enroll("random-"+game,player,1+random.nextInt(10000));
-                store.activate(ticket.id(),ORIGINAL);int target=random.nextBoolean()?10:random.nextInt(10);
+                store.activate(ticket.id(),ORIGINAL);int target=random.nextBoolean()?TARGET_DEFEATS:random.nextInt(TARGET_DEFEATS);
                 Set<UUID> oracle=new HashSet<>();
                 for(int step=0;step<target;step++){
                     UUID warden=new UUID(game,step);oracle.add(warden);store.defeat(ticket.id(),warden);
@@ -128,7 +178,7 @@ public final class ArenaDebtStoreTest {
                     if(random.nextBoolean()){store.queue(ticket.id());store.activate(ticket.id(),null);}
                     check(store.find(ticket.id()).orElseThrow().defeated().equals(oracle),"Progress matches independent set through pauses");
                 }
-                store.resolve(ticket.id(),target==10);store.markReturned(ticket.id());
+                store.resolve(ticket.id(),target==TARGET_DEFEATS);store.markReturned(ticket.id());
                 check(!store.hasUnresolved(player),"Random challenge completed");
                 check(store.enroll("random-"+game,player,ticket.debt()).returned(),"Completed randomized ID cannot reopen");
             }

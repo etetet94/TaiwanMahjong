@@ -9,6 +9,9 @@ import java.util.*;
 
 /** Durable, append-retained arena obligations; independent from physical inventories. */
 public final class ArenaDebtStore implements AutoCloseable {
+    public static final int TARGET_DEFEATS=2;
+    // Version-one snapshots can retain progress from the original ten-Warden challenge.
+    private static final int MAX_RECORDED_DEFEATS=10;
     private static final int MAGIC=0x4D4A4152, VERSION=1, MAX_SNAPSHOT=64*1024*1024;
     private final Path file;
     private final FileChannel lockChannel;
@@ -35,9 +38,9 @@ public final class ArenaDebtStore implements AutoCloseable {
             validId(id);validId(gameId);Objects.requireNonNull(player);Objects.requireNonNull(status);
             if(debt<=0)throw new IllegalArgumentException("Arena debt must be positive");
             defeated=Set.copyOf(defeated);
-            if(defeated.size()>10)throw new IllegalArgumentException("More than ten wardens recorded");
+            if(defeated.size()>MAX_RECORDED_DEFEATS)throw new IllegalArgumentException("Too many historical warden defeats recorded");
             if(status==Status.ACTIVE && returnPoint==null)throw new IllegalArgumentException("Active ticket has no return point");
-            if(status==Status.WON && defeated.size()!=10)throw new IllegalArgumentException("Winning requires ten wardens");
+            if(status==Status.WON && defeated.size()<TARGET_DEFEATS)throw new IllegalArgumentException("Winning requires "+TARGET_DEFEATS+" wardens");
             if(returned && !terminal(status))throw new IllegalArgumentException("Unfinished ticket cannot be returned");
         }
     }
@@ -89,7 +92,7 @@ public final class ArenaDebtStore implements AutoCloseable {
         checkOpen();Objects.requireNonNull(warden);Ticket old=require(id);
         if(old.defeated.contains(warden))return false;
         if(old.status!=Status.ACTIVE)throw new IllegalStateException("Only an active arena can record a defeat");
-        if(old.defeated.size()==10)return false;
+        if(old.defeated.size()>=TARGET_DEFEATS)return false;
         Set<UUID> defeated=new LinkedHashSet<>(old.defeated);defeated.add(warden);
         replace(copy(old,old.status,old.returnPoint,defeated,false));return true;
     }
@@ -105,7 +108,7 @@ public final class ArenaDebtStore implements AutoCloseable {
             if(old.status!=result)throw new IllegalStateException("Arena ticket already resolved with another outcome");
             return false;
         }
-        if(won&&old.defeated.size()!=10)throw new IllegalStateException("Winning requires ten distinct warden defeats");
+        if(won&&old.defeated.size()<TARGET_DEFEATS)throw new IllegalStateException("Winning requires "+TARGET_DEFEATS+" distinct warden defeats");
         replace(copy(old,result,old.returnPoint,old.defeated,false));return true;
     }
     /** Call after any idempotent winner reward and successful restoration/return. */
