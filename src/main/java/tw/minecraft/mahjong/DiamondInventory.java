@@ -64,12 +64,15 @@ final class DiamondInventory {
     }
 
     void transfer(Player player, int amount, boolean deposit) throws IOException {
+        transfer(player,amount,deposit,-1);
+    }
+    void transfer(Player player, int amount, boolean deposit,int preferredDepositSlot) throws IOException {
         mainThread();
         if (amount < 1 || amount > 2304) throw new IllegalArgumentException("數量必須為 1～2304。");
         if (blocked.contains(player.getUniqueId())) throw new IllegalArgumentException("鑽石帳戶正在確認存檔，請先重新登入；若仍被暫停請通知管理員。");
         recover(player);
         ItemStack[] original = cloneStorage(player.getInventory().getStorageContents());
-        ItemStack[] replacement = prepare(original, amount, deposit);
+        ItemStack[] replacement = prepare(original, amount, deposit,preferredDepositSlot);
         if (!deposit && ledger.balance(player.getUniqueId()) < amount) throw new IllegalArgumentException("鑽石帳戶餘額不足。");
         String id = UUID.randomUUID().toString();
 
@@ -106,9 +109,19 @@ final class DiamondInventory {
     }
 
     private static ItemStack[] prepare(ItemStack[] original, int amount, boolean deposit) {
+        return prepare(original,amount,deposit,-1);
+    }
+    private static ItemStack[] prepare(ItemStack[] original,int amount,boolean deposit,int preferredSlot) {
         ItemStack[] result = cloneStorage(original);
         int left = amount;
         if (deposit) {
+            if(preferredSlot!=-1){
+                if(preferredSlot<0||preferredSlot>=result.length||!plain(result[preferredSlot])||result[preferredSlot].getAmount()<amount)
+                    throw new IllegalArgumentException("這組鑽石已變動，請重新點選。");
+                int rest=result[preferredSlot].getAmount()-amount;
+                if(rest==0)result[preferredSlot]=null;else result[preferredSlot].setAmount(rest);
+                left=0;
+            }
             for (int i = 0; i < result.length && left > 0; i++) {
                 if (!plain(result[i])) continue;
                 int take = Math.min(left, result[i].getAmount()); left -= take;

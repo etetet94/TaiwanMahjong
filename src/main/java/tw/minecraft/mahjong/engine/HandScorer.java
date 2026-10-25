@@ -65,12 +65,13 @@ public final class HandScorer {
             if (sets[27 + c.seatWind()] > 0) add(parts, rules, "seat_wind", "門風（" + Tiles.name(27 + c.seatWind()) + "）");
             if (sets[27 + c.roundWind()] > 0) add(parts, rules, "round_wind", "圈風（" + Tiles.name(27 + c.roundWind()) + "）");
         }
-        for (int flower : flowers) if ((flower - 34) % 4 == c.seatWind()) add(parts, rules, "seat_flower", "正花（" + Tiles.name(flower) + "）");
+        // Preserve saved tile IDs/art: bamboo is 40 (north), chrysanthemum is 41 (west).
+        for (int flower : flowers) if (flowerWind(flower) == c.seatWind()) add(parts, rules, "seat_flower", "正花（" + Tiles.name(flower) + "）");
         if (flowers.containsAll(List.of(34, 35, 36, 37))) add(parts, rules, "flower_set", "花槓（春夏秋冬）");
         if (flowers.containsAll(List.of(38, 39, 40, 41))) add(parts, rules, "flower_set", "花槓（梅蘭竹菊）");
         boolean allExposed = declared.size() == 5 && declared.stream().allMatch(Meld::open) && !c.selfDraw();
         if (allExposed) add(parts, rules, "all_exposed", "全求人");
-        else if (uniqueWait) add(parts, rules, "single_wait", "獨聽");
+        else if (uniqueWait && singleWaitPlacement(d, c.winningTile(), winningMeld)) add(parts, rules, "single_wait", "獨聽");
         boolean twoSided = false;
         if (winningMeld >= 0) {
             Meld m = d.concealedMelds().get(winningMeld);
@@ -92,5 +93,18 @@ public final class HandScorer {
     }
     private static void add(List<Score.Tai> out, MahjongRules rules, String key, String name) {
         int value = rules.tai(key); if (value > 0) out.add(new Score.Tai(key, name, value));
+    }
+    private static int flowerWind(int tile) {
+        return switch (tile) {
+            case 34, 38 -> 0; case 35, 39 -> 1; case 36, 41 -> 2; case 37, 40 -> 3;
+            default -> -1;
+        };
+    }
+    private static boolean singleWaitPlacement(HandAnalyzer.Decomposition d, int tile, int winningMeld) {
+        if (winningMeld < 0) return d.pair() == tile;
+        Meld meld = d.concealedMelds().get(winningMeld);
+        if (meld.kind() != Meld.Kind.SEQUENCE) return false;
+        int offset = tile - meld.tile();
+        return offset == 1 || offset == 2 && meld.tile() % 9 == 0 || offset == 0 && meld.tile() % 9 == 6;
     }
 }

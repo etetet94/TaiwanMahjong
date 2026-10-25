@@ -26,9 +26,9 @@ public final class PracticeBot {
                     for (int tile = start; tile < start + 3; tile++) if (tile != game.lastTile()) after.remove(Integer.valueOf(tile));
                     List<Meld> melds = new ArrayList<>(game.melds(seat));
                     melds.add(new Meld(Meld.Kind.SEQUENCE, start, true, game.lastDiscarder()));
-                    int discard = chooseDiscard(after, melds, -1);
+                    int discard = chooseDiscard(after, melds, -1, game.rules().ruleSet(), t -> true);
                     after.remove(Integer.valueOf(discard));
-                    int quality = quality(after, melds);
+                    int quality = quality(after, melds, game.rules().ruleSet());
                     if (quality > bestScore) { bestScore = quality; best = start; }
                 }
                 game.claim(seat, MahjongGame.Action.CHI, best);
@@ -41,16 +41,20 @@ public final class PracticeBot {
         if (!concealed.isEmpty()) { game.concealedKan(seat, concealed.get(0)); return; }
         List<Integer> added = game.addedKanOptions(seat);
         if (!added.isEmpty()) { game.addedKan(seat, added.get(0)); return; }
-        game.discard(seat, chooseDiscard(game.hands(seat), game.melds(seat), game.lastDraw()));
+        if (game.declaredListening(seat)) { game.discard(seat, game.lastDraw()); return; }
+        game.discard(seat, chooseDiscard(game.hands(seat), game.melds(seat), game.lastDraw(), game.rules().ruleSet(), t -> game.canDiscard(seat, t)));
     }
 
     static int chooseDiscard(List<Integer> hand, List<Meld> melds, int drawn) {
+        return chooseDiscard(hand, melds, drawn, RuleSet.TAIWAN, t -> true);
+    }
+    private static int chooseDiscard(List<Integer> hand, List<Meld> melds, int drawn, RuleSet ruleSet, java.util.function.IntPredicate legal) {
         int bestTile = -1, bestQuality = Integer.MIN_VALUE;
         boolean[] seen = new boolean[34];
         for (int tile : hand) {
-            if (seen[tile]) continue; seen[tile] = true;
+            if (seen[tile] || !legal.test(tile)) continue; seen[tile] = true;
             List<Integer> after = new ArrayList<>(hand); after.remove(Integer.valueOf(tile));
-            int score = quality(after, melds);
+            int score = quality(after, melds, ruleSet);
             if (score > bestQuality || score == bestQuality &&
                     (tile == drawn || bestTile != drawn && tile > bestTile)) {
                 bestQuality = score; bestTile = tile;
@@ -60,9 +64,9 @@ public final class PracticeBot {
         return bestTile;
     }
 
-    private static int quality(List<Integer> hand, List<Meld> melds) {
+    private static int quality(List<Integer> hand, List<Meld> melds, RuleSet ruleSet) {
         int[] counts = new int[34]; for (int tile : hand) counts[tile]++;
-        List<Integer> waits = HandAnalyzer.waits(hand, melds);
+        List<Integer> waits = HandAnalyzer.waits(hand, melds, ruleSet);
         if (!waits.isEmpty()) {
             // Count only copies in this bot's own hand/melds, never hidden wall or opponents' hands.
             int outs = 0;

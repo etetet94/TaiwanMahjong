@@ -34,6 +34,7 @@ import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.joml.Matrix4f;
+import tw.minecraft.mahjong.engine.Meld;
 
 /**
  * A real three-block-wide display table. It changes no world blocks and needs no
@@ -47,13 +48,24 @@ public final class TableView implements Listener, AutoCloseable {
     }
 
     public record SeatState(UUID owner, String playerName, List<String> hand,
-            List<List<String>> melds, List<String> discards, List<String> flowers) {
+            List<List<String>> melds, List<String> discards, List<String> flowers,
+            List<Meld> actualMelds, int riichiDiscardIndex) {
+        public SeatState(UUID owner, String playerName, List<String> hand,
+                         List<List<String>> melds, List<String> discards, List<String> flowers) {
+            this(owner, playerName, hand, melds, discards, flowers, List.of(), -1);
+        }
+        public SeatState(UUID owner, String playerName, List<String> hand,
+                         List<List<String>> melds, List<String> discards, List<String> flowers, List<Meld> actualMelds) {
+            this(owner, playerName, hand, melds, discards, flowers, actualMelds, -1);
+        }
         public SeatState {
             playerName = Objects.requireNonNullElse(playerName, "空位");
             hand = List.copyOf(hand);
             melds = melds.stream().map(List::copyOf).toList();
             discards = List.copyOf(discards);
             flowers = List.copyOf(flowers);
+            actualMelds = List.copyOf(actualMelds);
+            if (riichiDiscardIndex < -1) throw new IllegalArgumentException("Invalid riichi discard index");
             if (hand.size() > 17) throw new IllegalArgumentException("Hand has too many tiles");
         }
         public static SeatState empty() {
@@ -74,6 +86,8 @@ public final class TableView implements Listener, AutoCloseable {
     private record Group(Object signature, List<Entity> entities) {}
     private record HandSignature(UUID owner, List<String> tiles) {}
     private record SeatSignature(UUID owner, String name, boolean turn, int dealerSeat) {}
+    private record MeldSignature(List<List<String>> labels, List<Meld> melds) {}
+    private record RiverSignature(List<String> labels, int riichiDiscardIndex) {}
     private record ChunkKey(UUID world, int x, int z) {}
     private static final Map<ChunkKey, Integer> CHUNK_USERS = new HashMap<>();
 
@@ -110,7 +124,7 @@ public final class TableView implements Listener, AutoCloseable {
                 block(base, location(x, 0, z), Material.DARK_OAK_LOG, 0.22, 0.74, 0.22, 0);
             }
         }
-        status = text(base, location(0, 1.53, 0), "台灣十六張麻將", NamedTextColor.GOLD,
+        status = text(base, location(0, 1.53, 0), "麻將牌桌", NamedTextColor.GOLD,
                 0.32F, 0, false, null, true);
         interaction(base, location(0, 0.89, 0), 0.25F, 0.4F, "actions", -1, null);
         groups.put("base", new Group("base", base));
@@ -157,7 +171,7 @@ public final class TableView implements Listener, AutoCloseable {
     public void render(ViewState state) {
         if (closed) return;
         if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("Use the server thread");
-        status.text(Component.text("台灣十六張麻將  ·  " + tableId, NamedTextColor.GOLD)
+        status.text(Component.text("麻將牌桌  ·  " + tableId, NamedTextColor.GOLD)
                 .append(Component.newline()).append(Component.text(state.status(), NamedTextColor.WHITE))
                 .append(Component.newline()).append(Component.text("牌山 " + state.remainingTiles()
                         + " 張  ·  右鍵座位／手牌操作", NamedTextColor.GRAY)));
@@ -186,16 +200,20 @@ public final class TableView implements Listener, AutoCloseable {
                             "hand", index, player.owner());
                 }
             });
-            replace("melds-" + seat, player.melds(), list -> {
-                int count = player.melds().stream().mapToInt(List::size).sum();
-                if (count == 0) return;
-                double width = TableGeometry.meldPitch(count) * 0.84;
+            replace("melds-" + seat, new MeldSignature(player.melds(), player.actualMelds()), list -> {
+                List<Integer> sizes = player.melds().stream().map(List::size).toList();
+                List<Integer> called = new ArrayList<>();
+                for (int group = 0; group < sizes.size(); group++) {
+                    Meld meld = group < player.actualMelds().size() ? player.actualMelds().get(group) : null;
+                    called.add(meld != null && meld.open() ? TableGeometry.calledTileIndex(seat, meld.fromSeat(), sizes.get(group)) : -1);
+                }
+                List<TableGeometry.MeldSlot> positions = TableGeometry.meldLayout(seat, sizes, called);
                 int index = 0;
-                for (List<String> meld : player.melds()) {
-                    for (String tile : meld) {
-                        TableGeometry.Point p = TableGeometry.meld(seat, index++, count);
-                        flatTile(list, seat, p, tile, width, 0.145,
-                                (float) Math.min(0.24, width / 0.475));
+                for (int group = 0; group < sizes.size(); group++) {
+                    Meld meld = group < player.actualMelds().size() ? player.actualMelds().get(group) : null;
+                    for (String tile : displayedMeld(player.melds().get(group), meld, called.get(group))) {
+                        TableGeometry.MeldSlot slot = positions.get(index++);
+                        flatTile(list, seat, slot.center(), tile, slot.width(), slot.depth(), 0.24F, slot.sideways());
                     }
                 }
             });
@@ -206,12 +224,12 @@ public final class TableView implements Listener, AutoCloseable {
                     flatTile(list, seat, p, player.flowers().get(index), 0.095, 0.12, 0.22F);
                 }
             });
-            replace("discards-" + seat, player.discards(), list -> {
+            replace("discards-" + seat, new RiverSignature(player.discards(), player.riichiDiscardIndex()), list -> {
                 List<String> river = player.discards();
-                int start = Math.max(0, river.size() - 30);
+                int start = Math.max(0, river.size() - TableGeometry.MAX_VISIBLE_DISCARDS);
                 for (int index = start; index < river.size(); index++) {
                     flatTile(list, seat, TableGeometry.discard(seat, index - start),
-                            river.get(index), 0.095, 0.105, 0.2F);
+                            river.get(index), 0.095, 0.105, 0.2F, index == player.riichiDiscardIndex());
                 }
             });
         }
@@ -234,12 +252,29 @@ public final class TableView implements Listener, AutoCloseable {
 
     private void flatTile(List<Entity> list, int seat, TableGeometry.Point p, String label,
             double width, double depth, float textScale) {
+        flatTile(list, seat, p, label, width, depth, textScale, false);
+    }
+
+    private void flatTile(List<Entity> list, int seat, TableGeometry.Point p, String label,
+            double width, double depth, float textScale, boolean sideways) {
         boolean hidden = label == null || label.isBlank() || label.equals("?");
+        float yaw = TableGeometry.yaw(seat) + (sideways ? 90 : 0);
         block(list, location(p.x(), 0.89, p.z()), hidden ? Material.GREEN_CONCRETE : Material.SMOOTH_QUARTZ,
-                width, 0.045, depth, TableGeometry.yaw(seat));
+                width, 0.045, depth, yaw);
         if (!hidden) text(list, location(p.x(), 0.938, p.z()), TileArt.face(label),
                 (float) (0.9 * Math.min(width / 0.4, depth / 0.8)),
-                TableGeometry.yaw(seat), true, null, false);
+                yaw, true, null, false);
+    }
+
+    /** Move the actual claimed tile to its source marker without changing the meld contents. */
+    static List<String> displayedMeld(List<String> labels, Meld meld, int calledIndex) {
+        if (meld == null || !meld.open() || meld.calledTile() == null || calledIndex < 0 || calledIndex >= labels.size()) return labels;
+        int original = meld.tiles().indexOf(meld.calledTile());
+        if (original < 0 || original >= labels.size()) return labels;
+        List<String> ordered = new ArrayList<>(labels);
+        String called = ordered.remove(original);
+        ordered.add(calledIndex, called);
+        return List.copyOf(ordered);
     }
 
     private void replace(String name, Object signature, Consumer<List<Entity>> renderer) {

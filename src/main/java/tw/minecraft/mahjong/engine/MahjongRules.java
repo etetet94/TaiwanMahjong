@@ -4,15 +4,29 @@ import java.io.Serializable;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Explicit Taiwan 16-tile house rules, not a mixture of Japanese 14-tile special hands. */
+/** Separate tile rules. Historical stake fields also support saved games settled per hand. */
 public record MahjongRules(int baseDiamonds, int diamondsPerTai, int reserveTiles,
-                           Map<String, Integer> taiValues) implements Serializable {
+                           Map<String, Integer> taiValues, RuleSet ruleSet) implements Serializable {
+    public MahjongRules(int baseDiamonds, int diamondsPerTai, int reserveTiles, Map<String, Integer> taiValues) {
+        this(baseDiamonds, diamondsPerTai, reserveTiles, taiValues, RuleSet.TAIWAN);
+    }
     public MahjongRules {
+        // Missing record components in old checkpoints deserialize as null.
+        if (ruleSet == null) ruleSet = RuleSet.TAIWAN;
         if (baseDiamonds < 0 || diamondsPerTai < 0 || reserveTiles < 0 || reserveTiles > 24)
             throw new IllegalArgumentException("無效的底、台或保留牌設定");
         taiValues = Map.copyOf(taiValues);
         for (int amount : taiValues.values()) if (amount < 0 || amount > 1000) throw new IllegalArgumentException("台數必須為 0～1000");
     }
+    public static MahjongRules japanese(int baseDiamonds, int diamondsPerHan) {
+        return new MahjongRules(baseDiamonds, diamondsPerHan, 14, Map.of(), RuleSet.JAPANESE);
+    }
+    public static MahjongRules japanese() { return japanese(5, 2); }
+    public MahjongRules withStakes(int baseDiamonds, int perUnit) {
+        return new MahjongRules(baseDiamonds, perUnit, reserveTiles, taiValues, ruleSet);
+    }
+    public boolean isJapanese() { return ruleSet == RuleSet.JAPANESE; }
+    public String unitLabel() { return ruleSet.unit(); }
     public static MahjongRules defaults() {
         Map<String, Integer> m = new LinkedHashMap<>();
         m.put("self_draw", 1); m.put("closed", 1); m.put("closed_self_draw", 3);
@@ -33,6 +47,7 @@ public record MahjongRules(int baseDiamonds, int diamondsPerTai, int reserveTile
     /** Conservative bound grouped by exclusive scoring families; no cap is applied to actual winnings. */
     public int maximumTai(int dealerStreak) {
         if (dealerStreak < 0 || dealerStreak > 1_000_000) throw new IllegalArgumentException("無效的連莊次數");
+        if (isJapanese()) return 104; // Conservative eight-yakuman bound; custom payouts have no dealer surcharge.
         int concealment = Math.max(tai("closed_self_draw"), tai("closed") + tai("self_draw")) + tai("single_wait");
         concealment = Math.max(concealment, tai("all_exposed"));
         int form = Math.max(tai("all_triplets"), tai("all_sequences")) +

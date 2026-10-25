@@ -1,4 +1,5 @@
-# 台灣 16 張；金額只使用遊戲內原版鑽石。
+# 台灣 16 張／日本 13 張共存；以下只作新桌預設值，房主可在開局前修改。
+# 日麻以標準符飜計點，diamonds-per-tai 作為新桌每 1000 點換算鑽石的預設值。
 base-diamonds: 5
 diamonds-per-tai: 2
 # 每局先保管押金，結算後未使用金額留在個人帳戶，可隨時領回。
@@ -6,7 +7,19 @@ diamonds-per-tai: 2
 escrow-diamonds-per-player: 5
 turn-seconds: 45
 claim-seconds: 12
-max-tables: 2
 interaction-distance: 8.0
 # 第一次啟用，在主世界出生點附近建立一張不破壞方塊的展示牌桌。
 create-first-table: true
+# 喜趣公告為全服文字；聽牌不公開手牌或聽口，練習對局會明確標示。
+# 吃碰槓胡有全螢幕標題；胡牌者會有三發零傷害煙火。
+celebrations:
+  enabled: true
+  listening-announcements: true
+  win-announcements: true
+  draw-announcements: true
+  sounds: true
+  particles: true
+  action-titles: true
+  win-fireworks: true
+  # 僅影響本地特效距離；0 關閉特效，最大 32 格。
+  effect-radius: 16.0

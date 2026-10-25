@@ -4,24 +4,35 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Exhaustively decomposes five melds plus a pair; quads are represented as declared melds. */
+/** Exhaustively decomposes the variant's meld count plus a pair; declared quads count as melds. */
 public final class HandAnalyzer {
     private HandAnalyzer() {}
     public record Decomposition(int pair, List<Meld> concealedMelds) implements Serializable {
         public Decomposition { concealedMelds = List.copyOf(concealedMelds); }
     }
     public static List<Decomposition> winningDecompositions(List<Integer> hand, List<Meld> declared) {
-        if (declared.size() > 5 || hand.size() != (5 - declared.size()) * 3 + 2) return List.of();
+        return winningDecompositions(hand, declared, RuleSet.TAIWAN);
+    }
+    public static List<Decomposition> winningDecompositions(List<Integer> hand, List<Meld> declared, RuleSet ruleSet) {
+        return decompositions(hand, declared, ruleSet, true);
+    }
+    /** Riichi-kan structure also considers hypothetical fifth-copy waits. */
+    static List<Decomposition> structureDecompositions(List<Integer> hand, List<Meld> declared, RuleSet ruleSet) {
+        return decompositions(hand, declared, ruleSet, false);
+    }
+    private static List<Decomposition> decompositions(List<Integer> hand, List<Meld> declared, RuleSet ruleSet, boolean physicalLimit) {
+        int groups = ruleSet.meldCount();
+        if (declared.size() > groups || hand.size() != (groups - declared.size()) * 3 + 2) return List.of();
         int[] counts = new int[34], physical = new int[34];
         for (int tile : hand) {
-            if (tile < 0 || tile >= 34 || ++physical[tile] > 4) return List.of();
+            if (tile < 0 || tile >= 34 || ++physical[tile] > 4 && physicalLimit) return List.of();
             counts[tile]++;
         }
-        for (Meld meld : declared) for (int tile : meld.tiles()) if (++physical[tile] > 4) return List.of();
+        for (Meld meld : declared) for (int tile : meld.tiles()) if (++physical[tile] > 4 && physicalLimit) return List.of();
         List<Decomposition> results = new ArrayList<>();
         for (int pair = 0; pair < 34; pair++) if (counts[pair] >= 2) {
             counts[pair] -= 2;
-            decompose(counts, 5 - declared.size(), pair, new ArrayList<>(), results);
+            decompose(counts, groups - declared.size(), pair, new ArrayList<>(), results);
             counts[pair] += 2;
         }
         return List.copyOf(results);
@@ -44,13 +55,43 @@ public final class HandAnalyzer {
         }
     }
     public static boolean canWin(List<Integer> hand, List<Meld> declared) {
-        return !winningDecompositions(hand, declared).isEmpty();
+        return canWin(hand, declared, RuleSet.TAIWAN);
+    }
+    public static boolean canWin(List<Integer> hand, List<Meld> declared, RuleSet ruleSet) {
+        return !winningDecompositions(hand, declared, ruleSet).isEmpty()
+                || ruleSet == RuleSet.JAPANESE && declared.isEmpty() && (isSevenPairs(hand) || isThirteenOrphans(hand));
+    }
+    public static boolean isSevenPairs(List<Integer> hand) {
+        int[] counts = specialCounts(hand);
+        if (counts == null) return false;
+        int pairs = 0;
+        for (int count : counts) { if (count == 2) pairs++; else if (count != 0) return false; }
+        return pairs == 7;
+    }
+    public static boolean isThirteenOrphans(List<Integer> hand) {
+        int[] counts = specialCounts(hand);
+        if (counts == null) return false;
+        int pairs = 0;
+        for (int tile = 0; tile < 34; tile++) {
+            if (Tiles.terminalOrHonor(tile)) { if (counts[tile] == 2) pairs++; else if (counts[tile] != 1) return false; }
+            else if (counts[tile] != 0) return false;
+        }
+        return pairs == 1;
+    }
+    private static int[] specialCounts(List<Integer> hand) {
+        if (hand.size() != 14) return null;
+        int[] counts = new int[34];
+        for (int tile : hand) if (tile < 0 || tile >= 34 || ++counts[tile] > 4) return null;
+        return counts;
     }
     public static List<Integer> waits(List<Integer> hand, List<Meld> declared) {
+        return waits(hand, declared, RuleSet.TAIWAN);
+    }
+    public static List<Integer> waits(List<Integer> hand, List<Meld> declared, RuleSet ruleSet) {
         List<Integer> work = new ArrayList<>(hand), result = new ArrayList<>();
         for (int tile = 0; tile < 34; tile++) {
             work.add(tile);
-            if (canWin(work, declared)) result.add(tile);
+            if (canWin(work, declared, ruleSet)) result.add(tile);
             work.remove(work.size() - 1);
         }
         return List.copyOf(result);

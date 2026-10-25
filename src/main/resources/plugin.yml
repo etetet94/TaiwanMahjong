@@ -4,7 +4,7 @@ name: TaiwanMahjong
 version: ${project.version}
 main: tw.minecraft.mahjong.TaiwanMahjongPlugin
 api-version: '26.3'
-description: 繁體中文台灣十六張實體麻將桌
+description: 繁中台麻與日麻、房主自訂金額、無傷煙火的實體麻將桌
 author: etetet94
 softdepend: [GravesX, EliteMobs, ValhallaMMO]
 commands:
