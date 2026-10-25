@@ -1,5 +1,12 @@
 # TaiwanMahjong 台灣十六張麻將
 
+<!-- ET_AUTHOR_SIGNATURE_START -->
+<div align="center">
+  <a href="https://www.instagram.com/182._.yiting/"><img src="docs/ET_SIGNATURE.svg" alt="ET 電子署名 | 作者 ET | IG @182._.yiting" width="650" /></a>
+  <p><strong>作者：ET</strong> &nbsp;·&nbsp; Instagram：<a href="https://www.instagram.com/182._.yiting/">@182._.yiting</a></p>
+</div>
+<!-- ET_AUTHOR_SIGNATURE_END -->
+
 適用 **Paper 26.3 / Java 25** 的繁體中文麻將插件。玩家可圍坐在 3×3 立體牌桌，右鍵摸牌、出牌、吃、碰、槓、胡牌與自摸。支援免費補電腦，以及使用遊戲內鑽石結算的四人對局。
 
 [下載插件與資源包](https://github.com/etetet94/TaiwanMahjong/releases) · [完整繁中玩法](docs/使用說明.txt) · [問題回報](https://github.com/etetet94/TaiwanMahjong/issues)

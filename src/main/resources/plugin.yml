@@ -1,3 +1,5 @@
+website: https://www.instagram.com/182._.yiting/
+authors: [ET]
 name: TaiwanMahjong
 version: ${project.version}
 main: tw.minecraft.mahjong.TaiwanMahjongPlugin

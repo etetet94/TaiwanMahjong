@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 248" role="img" aria-labelledby="title desc">
+  <title id="title">ET — TaiwanMahjong digital signature</title>
+  <desc id="desc">ET handwritten-style monogram, Author ET, Instagram @182._.yiting</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#162c2a"/>
+      <stop offset="1" stop-color="#0b1719"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" x2="1">
+      <stop offset="0" stop-color="#f5dfa8"/>
+      <stop offset=".52" stop-color="#d1a663"/>
+      <stop offset="1" stop-color="#f1d29a"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="856" height="244" rx="20" fill="url(#bg)" stroke="#997f55" stroke-width="2"/>
+  <rect x="16" y="16" width="828" height="216" rx="14" fill="none" stroke="#9c8151" stroke-opacity=".30"/>
+  <!-- A decorative ET monogram (typographic mark, not a cryptographic signature) -->
+  <text x="73" y="169" font-family="Georgia, 'Times New Roman', serif" font-style="italic" font-size="160" letter-spacing="-18" fill="url(#gold)">ET</text>
+  <path d="M61 189 C119 175 203 199 295 169 C307 166 315 161 326 156" stroke="url(#gold)" stroke-width="4" stroke-linecap="round" fill="none"/>
+  <circle cx="321" cy="156" r="4" fill="#f3d6a2"/>
+  <path d="M366 55 V194" stroke="#a98a59" stroke-opacity=".5" stroke-width="1.5"/>
+  <text x="404" y="81" font-family="Arial, sans-serif" font-size="16" letter-spacing="5" fill="#c5ad82">TAIWAN MAHJONG</text>
+  <text x="401" y="137" font-family="Arial, 'Noto Sans TC', sans-serif" font-weight="700" font-size="43" fill="#f8e8cb">AUTHOR  ET</text>
+  <text x="405" y="173" font-family="Arial, sans-serif" font-size="24" fill="#d9b981">IG  @182._.yiting</text>
+  <text x="405" y="205" font-family="Arial, sans-serif" font-size="12" letter-spacing="3" fill="#8fada4">ORIGINAL PROJECT SIGNATURE</text>
+</svg>
